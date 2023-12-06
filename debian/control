@@ -1,15 +1,79 @@
-Source: template-repository
-Section: unknown
+Source: golang-gogottrpc
+Section: golang
 Priority: optional
-Maintainer: Tsic404 <liuheng@deepin.org>
-Build-Depends: debhelper (>= 11)
-Standards-Version: 4.1.3
-Homepage: https://github.com/deepin-community/template-repository
-#Vcs-Browser: https://salsa.debian.org/debian/deepin-community-template-repository
-#Vcs-Git: https://salsa.debian.org/debian/deepin-community-template-repository.git
+Maintainer: Debian Go Packaging Team <team+pkg-go@tracker.debian.org>
+Uploaders: Arnaud Rebillout <arnaudr@kali.org>,
+Build-Depends: debhelper-compat (= 13),
+               dh-golang,
+               golang-any,
+               golang-github-gogo-protobuf-dev,
+               golang-github-pkg-errors-dev,
+               golang-github-sirupsen-logrus-dev,
+               golang-golang-x-sys-dev,
+               golang-google-genproto-dev,
+               golang-google-grpc-dev,
+               golang-google-protobuf-dev,
+               golang-github-prometheus-procfs-dev,
+Rules-Requires-Root: no
+Standards-Version: 4.6.2
+Homepage: https://github.com/containerd/ttrpc
+Vcs-Browser: https://salsa.debian.org/go-team/packages/golang-gogottrpc
+Vcs-Git: https://salsa.debian.org/go-team/packages/golang-gogottrpc.git
+XS-Go-Import-Path: github.com/containerd/ttrpc,
+                   github.com/stevvooe/ttrpc,
+Testsuite: autopkgtest-pkg-go
 
-Package: template-repository
+Package: golang-github-containerd-ttrpc-dev
+Replaces: golang-github-stevvooe-ttrpc-dev (<< 0.0~git20190211.6914432-1~),
+Breaks: golang-github-stevvooe-ttrpc-dev (<< 0.0~git20190211.6914432-1~),
+Provides: golang-github-stevvooe-ttrpc-dev,
+Architecture: all
+Depends: golang-github-gogo-protobuf-dev,
+         golang-github-pkg-errors-dev,
+         golang-github-sirupsen-logrus-dev,
+         golang-golang-x-sys-dev,
+         golang-google-genproto-dev,
+         golang-google-grpc-dev,
+         ${misc:Depends},
+Description: GRPC for low-memory environments
+ The existing grpc-go project requires a lot of memory overhead for
+ importing packages and at runtime. While this is great for many services
+ with low density requirements, this can be a problem when running a
+ large number of services on a single machine or on a machine with a
+ small amount of memory.
+ .
+ Using the same GRPC definitions, this project reduces the binary size
+ and protocol overhead required. We do this by eliding the net/http,
+ net/http2 and grpc package used by grpc replacing it with a lightweight
+ framing protocol. The result are smaller binaries that use less resident
+ memory with the same ease of use as GRPC.
+ .
+ Please note that while this project supports generating either end of
+ the protocol, the generated service definitions will be incompatible
+ with regular GRPC services, as they do not speak the same protocol.
+ .
+ This package provides sources.
+
+Package: gogottrpc
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}
-Description: <insert up to 60 chars description>
- <insert long description, indented with spaces>
+Built-Using: ${misc:Built-Using},
+Depends: ${misc:Depends},
+         ${shlibs:Depends},
+Description: GRPC for low-memory environments - utilities
+ The existing grpc-go project requires a lot of memory overhead for
+ importing packages and at runtime. While this is great for many services
+ with low density requirements, this can be a problem when running a
+ large number of services on a single machine or on a machine with a
+ small amount of memory.
+ .
+ Using the same GRPC definitions, this project reduces the binary size
+ and protocol overhead required. We do this by eliding the net/http,
+ net/http2 and grpc package used by grpc replacing it with a lightweight
+ framing protocol. The result are smaller binaries that use less resident
+ memory with the same ease of use as GRPC.
+ .
+ Please note that while this project supports generating either end of
+ the protocol, the generated service definitions will be incompatible
+ with regular GRPC services, as they do not speak the same protocol.
+ .
+ This package provides utilities.
