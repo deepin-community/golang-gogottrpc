@@ -17,20 +17,22 @@
 package ttrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net"
-	"reflect"
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
+	"github.com/containerd/ttrpc/internal"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/proto"
 )
 
 const serviceName = "testService"
@@ -40,7 +42,7 @@ const serviceName = "testService"
 // Typically, this is generated. We define it here to ensure that that package
 // primitive has what is required for generated code.
 type testingService interface {
-	Test(ctx context.Context, req *testPayload) (*testPayload, error)
+	Test(ctx context.Context, req *internal.TestPayload) (*internal.TestPayload, error)
 }
 
 type testingClient struct {
@@ -53,26 +55,16 @@ func newTestingClient(client *Client) *testingClient {
 	}
 }
 
-func (tc *testingClient) Test(ctx context.Context, req *testPayload) (*testPayload, error) {
-	var tp testPayload
+func (tc *testingClient) Test(ctx context.Context, req *internal.TestPayload) (*internal.TestPayload, error) {
+	var tp internal.TestPayload
 	return &tp, tc.client.Call(ctx, serviceName, "Test", req, &tp)
 }
-
-type testPayload struct {
-	Foo      string `protobuf:"bytes,1,opt,name=foo,proto3"`
-	Deadline int64  `protobuf:"varint,2,opt,name=deadline,proto3"`
-	Metadata string `protobuf:"bytes,3,opt,name=metadata,proto3"`
-}
-
-func (r *testPayload) Reset()         { *r = testPayload{} }
-func (r *testPayload) String() string { return fmt.Sprintf("%+#v", r) }
-func (r *testPayload) ProtoMessage()  {}
 
 // testingServer is what would be implemented by the user of this package.
 type testingServer struct{}
 
-func (s *testingServer) Test(ctx context.Context, req *testPayload) (*testPayload, error) {
-	tp := &testPayload{Foo: strings.Repeat(req.Foo, 2)}
+func (s *testingServer) Test(ctx context.Context, req *internal.TestPayload) (*internal.TestPayload, error) {
+	tp := &internal.TestPayload{Foo: strings.Repeat(req.Foo, 2)}
 	if dl, ok := ctx.Deadline(); ok {
 		tp.Deadline = dl.UnixNano()
 	}
@@ -90,7 +82,7 @@ func (s *testingServer) Test(ctx context.Context, req *testPayload) (*testPayloa
 func registerTestingService(srv *Server, svc testingService) {
 	srv.Register(serviceName, map[string]Method{
 		"Test": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
-			var req testPayload
+			var req internal.TestPayload
 			if err := unmarshal(&req); err != nil {
 				return nil, err
 			}
@@ -99,10 +91,16 @@ func registerTestingService(srv *Server, svc testingService) {
 	})
 }
 
-func init() {
-	proto.RegisterType((*testPayload)(nil), "testPayload")
-	proto.RegisterType((*Request)(nil), "Request")
-	proto.RegisterType((*Response)(nil), "Response")
+func protoEqual(a, b proto.Message) (bool, error) {
+	ma, err := proto.Marshal(a)
+	if err != nil {
+		return false, err
+	}
+	mb, err := proto.Marshal(b)
+	if err != nil {
+		return false, err
+	}
+	return bytes.Equal(ma, mb), nil
 }
 
 func TestServer(t *testing.T) {
@@ -123,16 +121,27 @@ func TestServer(t *testing.T) {
 	go server.Serve(ctx, listener)
 	defer server.Shutdown(ctx)
 
-	const calls = 2
-	results := make(chan callResult, 2)
-	go roundTrip(ctx, t, tclient, "bar", results)
-	go roundTrip(ctx, t, tclient, "baz", results)
+	testCases := []string{"bar", "baz"}
+	results := make(chan callResult, len(testCases))
+	for _, tc := range testCases {
+		go func(expected string) {
+			results <- roundTrip(ctx, tclient, expected)
+		}(tc)
+	}
 
-	for i := 0; i < calls; i++ {
+	for i := 0; i < len(testCases); {
 		result := <-results
-		if !reflect.DeepEqual(result.received, result.expected) {
+		if result.err != nil {
+			t.Fatalf("(%s): %v", result.name, result.err)
+		}
+		equal, err := protoEqual(result.received, result.expected)
+		if err != nil {
+			t.Fatalf("failed to compare %s and %s: %s", result.received, result.expected, err)
+		}
+		if !equal {
 			t.Fatalf("unexpected response: %+#v != %+#v", result.received, result.expected)
 		}
+		i++
 	}
 }
 
@@ -150,7 +159,7 @@ func TestServerUnimplemented(t *testing.T) {
 		errs <- server.Serve(ctx, listener)
 	}()
 
-	var tp testPayload
+	var tp internal.TestPayload
 	if err := client.Call(ctx, "Not", "Found", &tp, &tp); err == nil {
 		t.Fatalf("expected error from non-existent service call")
 	} else if status, ok := status.FromError(err); !ok {
@@ -192,20 +201,18 @@ func TestServerListenerClosed(t *testing.T) {
 func TestServerShutdown(t *testing.T) {
 	const ncalls = 5
 	var (
-		ctx                      = context.Background()
-		server                   = mustServer(t)(NewServer())
-		addr, listener           = newTestListener(t)
-		shutdownStarted          = make(chan struct{})
-		shutdownFinished         = make(chan struct{})
-		handlersStarted          = make(chan struct{})
-		handlersStartedCloseOnce sync.Once
-		proceed                  = make(chan struct{})
-		serveErrs                = make(chan error, 1)
-		callwg                   sync.WaitGroup
-		callErrs                 = make(chan error, ncalls)
-		shutdownErrs             = make(chan error, 1)
-		client, cleanup          = newTestClient(t, addr)
-		_, cleanup2              = newTestClient(t, addr) // secondary connection
+		ctx              = context.Background()
+		server           = mustServer(t)(NewServer())
+		addr, listener   = newTestListener(t)
+		shutdownStarted  = make(chan struct{})
+		shutdownFinished = make(chan struct{})
+		handlersStarted  sync.WaitGroup
+		proceed          = make(chan struct{})
+		serveErrs        = make(chan error, 1)
+		callErrs         = make(chan error, ncalls)
+		shutdownErrs     = make(chan error, 1)
+		client, cleanup  = newTestClient(t, addr)
+		_, cleanup2      = newTestClient(t, addr) // secondary connection
 	)
 	defer cleanup()
 	defer cleanup2()
@@ -213,14 +220,14 @@ func TestServerShutdown(t *testing.T) {
 	// register a service that takes until we tell it to stop
 	server.Register(serviceName, map[string]Method{
 		"Test": func(ctx context.Context, unmarshal func(interface{}) error) (interface{}, error) {
-			var req testPayload
+			var req internal.TestPayload
 			if err := unmarshal(&req); err != nil {
 				return nil, err
 			}
 
-			handlersStartedCloseOnce.Do(func() { close(handlersStarted) })
+			handlersStarted.Done()
 			<-proceed
-			return &testPayload{Foo: "waited"}, nil
+			return &internal.TestPayload{Foo: "waited"}, nil
 		},
 	})
 
@@ -229,20 +236,18 @@ func TestServerShutdown(t *testing.T) {
 	}()
 
 	// send a series of requests that will get blocked
-	for i := 0; i < 5; i++ {
-		callwg.Add(1)
+	for i := 0; i < ncalls; i++ {
+		handlersStarted.Add(1)
 		go func(i int) {
-			callwg.Done()
-			tp := testPayload{Foo: "half" + fmt.Sprint(i)}
+			tp := internal.TestPayload{Foo: "half" + fmt.Sprint(i)}
 			callErrs <- client.Call(ctx, serviceName, "Test", &tp, &tp)
 		}(i)
 	}
 
-	<-handlersStarted
+	handlersStarted.Wait()
 	go func() {
 		close(shutdownStarted)
 		shutdownErrs <- server.Shutdown(ctx)
-		// server.Close()
 		close(shutdownFinished)
 	}()
 
@@ -309,7 +314,7 @@ func TestOversizeCall(t *testing.T) {
 
 	registerTestingService(server, &testingServer{})
 
-	tp := &testPayload{
+	tp := &internal.TestPayload{
 		Foo: strings.Repeat("a", 1+messageLengthMax),
 	}
 	if err := client.Call(ctx, serviceName, "Test", tp, tp); err == nil {
@@ -344,7 +349,7 @@ func TestClientEOF(t *testing.T) {
 
 	registerTestingService(server, &testingServer{})
 
-	tp := &testPayload{}
+	tp := &internal.TestPayload{}
 	// do a regular call
 	if err := client.Call(ctx, serviceName, "Test", tp, tp); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -358,10 +363,17 @@ func TestClientEOF(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	client.UserOnCloseWait(ctx)
+
 	// server shutdown, but we still make a call.
 	if err := client.Call(ctx, serviceName, "Test", tp, tp); err == nil {
 		t.Fatalf("expected error when calling against shutdown server")
 	} else if !errors.Is(err, ErrClosed) {
+		var errno syscall.Errno
+		if errors.As(err, &errno) {
+			t.Logf("errno=%d", errno)
+		}
+
 		t.Fatalf("expected to have a cause of ErrClosed, got %v", err)
 	}
 }
@@ -373,7 +385,7 @@ func TestServerRequestTimeout(t *testing.T) {
 		addr, listener  = newTestListener(t)
 		testImpl        = &testingServer{}
 		client, cleanup = newTestClient(t, addr)
-		result          testPayload
+		result          internal.TestPayload
 	)
 	defer cancel()
 	defer cleanup()
@@ -384,13 +396,13 @@ func TestServerRequestTimeout(t *testing.T) {
 	go server.Serve(ctx, listener)
 	defer server.Shutdown(ctx)
 
-	if err := client.Call(ctx, serviceName, "Test", &testPayload{}, &result); err != nil {
+	if err := client.Call(ctx, serviceName, "Test", &internal.TestPayload{}, &result); err != nil {
 		t.Fatalf("unexpected error making call: %v", err)
 	}
 
 	dl, _ := ctx.Deadline()
 	if result.Deadline != dl.UnixNano() {
-		t.Fatalf("expected deadline %v, actual: %v", dl, result.Deadline)
+		t.Fatalf("expected deadline %v, actual: %v", dl, time.Unix(0, result.Deadline))
 	}
 }
 
@@ -410,7 +422,7 @@ func TestServerConnectionsLeak(t *testing.T) {
 
 	registerTestingService(server, &testingServer{})
 
-	tp := &testPayload{}
+	tp := &internal.TestPayload{}
 	// do a regular call
 	if err := client.Call(ctx, serviceName, "Test", tp, tp); err != nil {
 		t.Fatalf("unexpected error during test call: %v", err)
@@ -459,7 +471,7 @@ func BenchmarkRoundTrip(b *testing.B) {
 	go server.Serve(ctx, listener)
 	defer server.Shutdown(ctx)
 
-	var tp testPayload
+	var tp internal.TestPayload
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
@@ -473,39 +485,55 @@ func checkServerShutdown(t *testing.T, server *Server) {
 	t.Helper()
 	server.mu.Lock()
 	defer server.mu.Unlock()
+
 	if len(server.listeners) > 0 {
-		t.Fatalf("expected listeners to be empty: %v", server.listeners)
+		t.Errorf("expected listeners to be empty: %v", server.listeners)
+	}
+	for listener := range server.listeners {
+		t.Logf("listener addr=%s", listener.Addr())
 	}
 
 	if len(server.connections) > 0 {
-		t.Fatalf("expected connections to be empty: %v", server.connections)
+		t.Errorf("expected connections to be empty: %v", server.connections)
+	}
+	for conn := range server.connections {
+		state, ok := conn.getState()
+		if !ok {
+			t.Errorf("failed to get state from %v", conn)
+		}
+		t.Logf("conn state=%s", state)
 	}
 }
 
 type callResult struct {
-	input    *testPayload
-	expected *testPayload
-	received *testPayload
+	name     string
+	err      error
+	input    *internal.TestPayload
+	expected *internal.TestPayload
+	received *internal.TestPayload
 }
 
-func roundTrip(ctx context.Context, t *testing.T, client *testingClient, value string, results chan callResult) {
-	t.Helper()
+func roundTrip(ctx context.Context, client *testingClient, name string) callResult {
 	var (
-		tp = &testPayload{
-			Foo: "bar",
+		tp = &internal.TestPayload{
+			Foo: name,
 		}
 	)
 
-	ctx = WithMetadata(ctx, MD{"foo": []string{"bar"}})
+	ctx = WithMetadata(ctx, MD{"foo": []string{name}})
 
 	resp, err := client.Test(ctx, tp)
 	if err != nil {
-		t.Fatal(err)
+		return callResult{
+			name: name,
+			err:  err,
+		}
 	}
 
-	results <- callResult{
+	return callResult{
+		name:     name,
 		input:    tp,
-		expected: &testPayload{Foo: strings.Repeat(tp.Foo, 2), Metadata: "bar"},
+		expected: &internal.TestPayload{Foo: strings.Repeat(tp.Foo, 2), Metadata: name},
 		received: resp,
 	}
 }

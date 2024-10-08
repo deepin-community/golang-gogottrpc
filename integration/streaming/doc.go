@@ -1,6 +1,3 @@
-//go:build !linux
-// +build !linux
-
 /*
    Copyright The containerd Authors.
 
@@ -17,10 +14,4 @@
    limitations under the License.
 */
 
-package main
-
-import ttrpc "github.com/containerd/ttrpc"
-
-func defaultHandshaker() ttrpc.Handshaker {
-	return nil
-}
+package streaming

@@ -1,6 +1,6 @@
 #!/usr/bin/make -f
 
-export DH_GOLANG_EXCLUDES := example
+export DH_GOLANG_EXCLUDES := example ttrpc/cmd ttrpc/plugin integration
 
 %:
 	dh $@ --buildsystem=golang --with=golang
