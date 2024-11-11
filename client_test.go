@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/containerd/ttrpc/internal"
 )
 
 func TestUserOnCloseWait(t *testing.T) {
@@ -46,7 +48,7 @@ func TestUserOnCloseWait(t *testing.T) {
 			}),
 		)
 
-		tp      testPayload
+		tp      internal.TestPayload
 		tclient = newTestingClient(client)
 	)
 
@@ -62,7 +64,7 @@ func TestUserOnCloseWait(t *testing.T) {
 		t.Fatalf("expected error %v, but got %v", context.DeadlineExceeded, err)
 	}
 
-	_ = <-dataCh
+	<-dataCh
 
 	if err := client.UserOnCloseWait(ctx); err != nil {
 		t.Fatalf("expected error nil , but got %v", err)

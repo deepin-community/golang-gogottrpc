@@ -1,6 +1,3 @@
-//go:build !linux
-// +build !linux
-
 /*
    Copyright The containerd Authors.
 
@@ -17,10 +14,10 @@
    limitations under the License.
 */
 
-package main
-
-import ttrpc "github.com/containerd/ttrpc"
-
-func defaultHandshaker() ttrpc.Handshaker {
-	return nil
-}
+/*
+package ttrpc defines and implements a low level simple transfer protocol
+optimized for low latency and reliable connections between processes on the same
+host. The protocol uses simple framing for sending requests, responses, and data
+using multiple streams.
+*/
+package ttrpc
