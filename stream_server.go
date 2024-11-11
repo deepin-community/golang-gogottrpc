@@ -1,6 +1,3 @@
-//go:build !linux
-// +build !linux
-
 /*
    Copyright The containerd Authors.
 
@@ -17,10 +14,9 @@
    limitations under the License.
 */
 
-package main
+package ttrpc
 
-import ttrpc "github.com/containerd/ttrpc"
-
-func defaultHandshaker() ttrpc.Handshaker {
-	return nil
+type StreamServer interface {
+	SendMsg(m interface{}) error
+	RecvMsg(m interface{}) error
 }

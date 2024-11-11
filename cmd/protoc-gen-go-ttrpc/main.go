@@ -18,15 +18,25 @@ package main
 
 import (
 	"google.golang.org/protobuf/compiler/protogen"
+	"google.golang.org/protobuf/types/pluginpb"
 )
 
 func main() {
-	protogen.Options{}.Run(func(gen *protogen.Plugin) error {
+	var servicePrefix string
+	protogen.Options{
+		ParamFunc: func(name, value string) error {
+			if name == "prefix" {
+				servicePrefix = value
+			}
+			return nil
+		},
+	}.Run(func(gen *protogen.Plugin) error {
+		gen.SupportedFeatures = uint64(pluginpb.CodeGeneratorResponse_FEATURE_PROTO3_OPTIONAL)
 		for _, f := range gen.Files {
 			if !f.Generate {
 				continue
 			}
-			if err := generate(gen, f); err != nil {
+			if err := generate(gen, f, servicePrefix); err != nil {
 				return err
 			}
 		}

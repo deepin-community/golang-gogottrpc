@@ -1,3 +1,29 @@
+golang-gogottrpc (1.2.4-2) unstable; urgency=medium
+
+  * Team upload
+  * Upload to unstable
+  * Removes dependency on golang/protobuf@v1.4, closes: #975431
+
+ -- Reinhard Tartler <siretart@tauware.de>  Sun, 23 Jun 2024 09:11:22 -0400
+
+golang-gogottrpc (1.2.4-1) experimental; urgency=medium
+
+  * Team upload
+  * New upstream release
+    - Drops dependencies completely on gogoproto and builds with google/protobuf
+  * drop references to old golang-github-stevvooe-ttrpc-dev
+
+ -- Reinhard Tartler <siretart@tauware.de>  Mon, 10 Jun 2024 22:33:36 -0400
+
+golang-gogottrpc (1.1.2-2) unstable; urgency=medium
+
+  * Team upload
+  * Stop producing the gogottrpc package. Nothing in debian requires these
+    binaries and this helps untangling dependencies which facilitates
+    upgrading the protobuf and grpc packages
+
+ -- Reinhard Tartler <siretart@tauware.de>  Mon, 10 Jun 2024 22:28:01 -0400
+
 golang-gogottrpc (1.1.2-1) unstable; urgency=medium
 
   * Team upload
